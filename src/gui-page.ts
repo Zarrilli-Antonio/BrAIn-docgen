@@ -117,6 +117,8 @@ export const PAGE = `<!doctype html>
     padding:8px 12px; border-radius:var(--radius); font-size:13px; font-family:ui-monospace,monospace;
   }
   .toolbar input:focus { outline:none; border-color:var(--orange); box-shadow:0 0 0 3px rgba(255,138,0,0.15); }
+  #progress { height:6px; border-radius:3px; background:var(--glass-border); overflow:hidden; margin:0 0 10px; }
+  #progressBar { height:100%; width:100%; transform:scaleX(0); transform-origin:left; background:var(--orange); transition:transform 200ms ease-out; }
   #out {
     background:#000000; border:1px solid var(--glass-border); border-radius:var(--radius); padding:12px;
     font-family:ui-monospace,monospace; font-size:12px; white-space:pre-wrap; min-height:120px; max-height:360px; overflow:auto;
@@ -162,6 +164,10 @@ export const PAGE = `<!doctype html>
     <div class="toolbar" id="maxCharsRow" style="display:none">
       <input id="maxChars" type="number" value="200000" placeholder="Max chars (--whole only)" />
     </div>
+    <div class="toolbar" id="concurrencyRow" style="display:none">
+      <label><span>Concurrency</span><input id="concurrency" type="number" min="1" value="1" /></label>
+    </div>
+    <label id="dryRunRow"><input id="dryRun" type="checkbox" /> <span>Dry run (list what would happen, no API calls)</span></label>
 
     <label><span>BrAIn server</span><input id="brainUrl" value="http://localhost:4173" /></label>
 
@@ -203,7 +209,8 @@ export const PAGE = `<!doctype html>
       <label><span>API key</span><input id="apiKeyOpenai" type="password" placeholder="optional for a keyless server" /></label>
     </div>
 
-    <div class="toolbar"><button id="run">Generate</button></div>
+    <div class="toolbar"><button id="run">Generate</button><button type="button" id="stop" style="display:none">Stop</button></div>
+    <div id="progress" style="display:none"><div id="progressBar"></div></div>
     <pre id="out"></pre>
   </div>
 </main>
@@ -225,6 +232,7 @@ export const PAGE = `<!doctype html>
     });
     $("docPathRow").style.display = mode === "all" || mode === "sync" ? "none" : "";
     $("maxCharsRow").style.display = mode === "whole" ? "" : "none";
+    $("concurrencyRow").style.display = mode === "all" || mode === "sync" ? "" : "none";
     $("syncHint").style.display = mode === "sync" ? "" : "none";
   });
 
@@ -278,6 +286,8 @@ export const PAGE = `<!doctype html>
     const provider = $("provider").value;
     const body = { target: $("target").value || undefined, mode, brainUrl: $("brainUrl").value || undefined, provider };
     if (mode === "whole") body.maxChars = Number($("maxChars").value) || undefined;
+    if (mode === "all" || mode === "sync") body.concurrency = Number($("concurrency").value) || undefined;
+    body.dryRun = $("dryRun").checked || undefined;
     if (mode !== "all" && mode !== "sync") body.docPath = $("docPath").value || undefined;
     if (provider === "local") {
       body.ollamaHost = $("ollamaHost").value || undefined;
@@ -293,35 +303,58 @@ export const PAGE = `<!doctype html>
     return body;
   }
 
+  let controller = null;
+
+  $("stop").addEventListener("click", () => {
+    if (controller) controller.abort();
+  });
+
   $("run").addEventListener("click", async () => {
     for (const id of REMEMBER) {
       try { localStorage.setItem("brain-docgen:" + id, $(id).value); } catch {}
     }
     const runBtn = $("run");
+    const stopBtn = $("stop");
     const out = $("out");
+    const progress = $("progress");
+    const progressBar = $("progressBar");
     runBtn.disabled = true;
+    stopBtn.style.display = "";
     out.textContent = "";
+    progress.style.display = "none";
+    progressBar.style.transform = "scaleX(0)";
+    controller = new AbortController();
     try {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(currentBody()),
+        signal: controller.signal,
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        out.textContent += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+        out.textContent += chunk;
         out.scrollTop = out.scrollHeight;
+        const matches = [...chunk.matchAll(/\[(\d+)\/(\d+)\]/g)];
+        if (matches.length) {
+          const [, done_, total_] = matches[matches.length - 1];
+          progress.style.display = "";
+          progressBar.style.transform = "scaleX(" + Number(done_) / Number(total_) + ")";
+        }
       }
       out.classList.remove("saved-flash");
       void out.offsetWidth;
       out.classList.add("saved-flash");
     } catch (e) {
-      out.textContent += "\\n" + e.message;
+      out.textContent += "\\n" + (e.name === "AbortError" ? "[stopped]" : e.message);
     } finally {
       runBtn.disabled = false;
+      stopBtn.style.display = "none";
+      controller = null;
     }
   });
 </script>

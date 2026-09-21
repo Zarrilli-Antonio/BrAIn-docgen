@@ -85,6 +85,8 @@ a project-wide `overview.md`.
 | `--sync` | off | Same as `--all`, plus deletes docs whose source file is gone |
 | `--whole` | off | One doc for everything under `<path>` (or the whole project), generated in a single pass |
 | `--max-chars` | `200000` | `--whole` only: character budget for how much source is fed to the model in one call |
+| `--concurrency` | `1` | `--all`/`--sync` only: how many files to generate in parallel |
+| `--dry-run` | off | Lists what would be generated/removed, no model calls or writes |
 | `--brain-url` | `http://localhost:4173` | Where the target project's BrAIn HTTP server is listening |
 | `--provider` | `local` | `local` (Ollama), `anthropic`, or `openai` (any OpenAI-compatible endpoint) |
 | `--model` | `qwen2.5-coder:14b` (local) / `claude-sonnet-5` (anthropic) / *required* (openai) | Model name |
@@ -101,6 +103,8 @@ brain-docgen src/core --provider anthropic --model claude-sonnet-5
 brain-docgen --provider anthropic
 brain-docgen --all --provider local --model qwen2.5-coder:14b
 brain-docgen --sync --provider local --model qwen2.5-coder:14b   # regenerate + drop docs for deleted files
+brain-docgen --all --concurrency 4 --provider local               # 4 files generated in parallel
+brain-docgen --sync --dry-run --provider local                    # preview what --sync would do
 brain-docgen --whole --provider local --model qwen2.5-coder:14b
 brain-docgen --whole --provider openai --base-url https://api.openai.com/v1 --model gpt-4.1 --api-key sk-...
 brain-docgen --provider openai --base-url http://localhost:11434/v1 --model qwen3:8b   # Ollama via its OpenAI-compatible endpoint
@@ -119,10 +123,13 @@ brain-docgen-gui [port]   # default 4174
 ```
 
 Open `http://localhost:4174` (if taken, it tries the next port up, same as BrAIn's own server). Pick a mode (single / `--all` / `--whole` / `--sync`), fill in the
-BrAIn URL and model settings, hit Generate — output streams live as it runs. It's a thin front
-end: the GUI server spawns the same `brain-docgen` CLI as a child process and streams its
-stdout/stderr to the page, so there's no separate generation logic to keep in sync. Non-secret
-fields (URLs, provider, model) are remembered per-browser via `localStorage`; API keys are not.
+BrAIn URL and model settings, hit Generate — output streams live as it runs, with a progress bar
+for `--all`/`--sync`. Hit Stop to cancel a run in progress. `--all`/`--sync` have a Concurrency
+field to generate several files in parallel; a Dry run checkbox lists what would happen without
+calling the model or writing anything. It's a thin front end: the GUI server spawns the same
+`brain-docgen` CLI as a child process and streams its stdout/stderr to the page, so there's no
+separate generation logic to keep in sync. Non-secret fields (URLs, provider, model) are
+remembered per-browser via `localStorage`; API keys are not.
 
 **Model dropdowns are populated live**, not guessed: the Local (Ollama) model field lists whatever
 `ollama_host/api/tags` actually reports pulled — refreshes automatically when you change the

@@ -78,12 +78,15 @@ function startServer(port: number, attemptsLeft = 20): void {
         res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
         res.write(`$ brain-docgen ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}\n\n`);
         const child = spawn(process.execPath, [CLI_PATH, ...args]);
+        req.on("close", () => child.kill());
         child.stdout.on("data", (d) => res.write(d));
         child.stderr.on("data", (d) => res.write(d));
         child.on("error", (e) => res.write(`\nFailed to start: ${e.message}\n`));
         child.on("close", (code) => {
-          res.write(`\n[exit ${code}]\n`);
-          res.end();
+          if (!res.writableEnded) {
+            res.write(`\n[exit ${code}]\n`);
+            res.end();
+          }
         });
       });
       return;

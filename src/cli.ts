@@ -6,8 +6,8 @@ import { OllamaProvider } from "./providers/ollama.js";
 import { AnthropicProvider } from "./providers/anthropic.js";
 import { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 
-const VALUE_FLAGS = ["--target", "--brain-url", "--provider", "--model", "--ollama-host", "--api-key", "--doc-path", "--base-url", "--max-chars"];
-const BOOLEAN_FLAGS = ["--all", "--whole", "--sync"];
+const VALUE_FLAGS = ["--target", "--brain-url", "--provider", "--model", "--ollama-host", "--api-key", "--doc-path", "--base-url", "--max-chars", "--concurrency"];
+const BOOLEAN_FLAGS = ["--all", "--whole", "--sync", "--dry-run"];
 
 // Docs not tied 1:1 to a source file — --sync's stale-doc cleanup must never touch these.
 const PROTECTED_DOCS = new Set(["memory.md", "style-guide.md", "overview.md"]);
@@ -30,6 +30,8 @@ export function parseArgs(args: string[] = process.argv.slice(2)) {
     all: args.includes("--all"),
     whole: args.includes("--whole"),
     sync: args.includes("--sync"),
+    dryRun: args.includes("--dry-run"),
+    concurrency: Number(values.get("--concurrency") ?? 1),
     brainUrl: values.get("--brain-url") ?? "http://localhost:4173",
     provider: values.get("--provider") ?? "local",
     model: values.get("--model"),
@@ -93,19 +95,26 @@ async function generateOne(brain: BrainClient, provider: Provider, target: strin
 
 /** One doc per file, generated and written one at a time — full coverage regardless of size,
  *  unlike --whole which is bounded by a char budget. Used by both --all and --sync. */
-async function generateAllFiles(brain: BrainClient, provider: Provider, targets: string[]): Promise<{ done: number; failed: number }> {
+async function generateAllFiles(brain: BrainClient, provider: Provider, targets: string[], concurrency = 1): Promise<{ done: number; failed: number }> {
   let done = 0;
   let failed = 0;
-  for (const [i, target] of targets.entries()) {
-    try {
-      const docPath = await generateOne(brain, provider, target);
-      done++;
-      console.log(`[${i + 1}/${targets.length}] ${target} -> ${docPath}`);
-    } catch (e) {
-      failed++;
-      console.error(`[${i + 1}/${targets.length}] ${target}: ${(e as Error).message}`);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next++;
+      if (i >= targets.length) return;
+      const target = targets[i];
+      try {
+        const docPath = await generateOne(brain, provider, target);
+        done++;
+        console.log(`[${i + 1}/${targets.length}] ${target} -> ${docPath}`);
+      } catch (e) {
+        failed++;
+        console.error(`[${i + 1}/${targets.length}] ${target}: ${(e as Error).message}`);
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, targets.length)) }, worker));
   return { done, failed };
 }
 
@@ -120,7 +129,7 @@ interface DocStore {
  *  subfolder either, since `targets` (and so `currentDocPaths`) only cover what was scanned.
  *  Takes just the two methods it needs (not the full BrainClient) so it's testable with a fake,
  *  no real BrAIn server required. */
-export async function removeStaleDocs(brain: DocStore, targets: string[], scope: string | undefined): Promise<{ removed: number; failed: number }> {
+export async function removeStaleDocs(brain: DocStore, targets: string[], scope: string | undefined, dryRun = false): Promise<{ removed: number; failed: number }> {
   const currentDocPaths = new Set(targets.map(docPathFor));
   const scopePrefix = scope && scope !== "." ? `${scope}/` : undefined;
   const existingDocs = await brain.listDocs();
@@ -128,6 +137,11 @@ export async function removeStaleDocs(brain: DocStore, targets: string[], scope:
   let removed = 0;
   let failed = 0;
   for (const doc of stale) {
+    if (dryRun) {
+      console.log(`Would remove stale doc: ${doc}`);
+      removed++;
+      continue;
+    }
     try {
       await brain.deleteDoc(doc);
       removed++;
@@ -143,8 +157,14 @@ export async function removeStaleDocs(brain: DocStore, targets: string[], scope:
 /** One generation pass over the whole codebase (or everything under `scope`) instead of one call
  *  per file — the model sees every file together, so it can describe how they relate instead of
  *  N isolated summaries that don't know about each other. Writes a single doc. */
-async function generateWhole(brain: BrainClient, provider: Provider, scope: string | undefined, docPathOverride: string | undefined, maxChars: number): Promise<{ docPath: string; included: number; total: number }> {
+async function generateWhole(brain: BrainClient, provider: Provider, scope: string | undefined, docPathOverride: string | undefined, maxChars: number, dryRun = false): Promise<{ docPath: string; included: number; total: number }> {
   const targets = flattenFiles(await brain.listFiles(scope ?? "."));
+  const docPath = docPathOverride ?? "overview.md";
+  if (dryRun) {
+    // No char budget can be computed without reading file content, so a dry run reports the
+    // candidate file count only — the real run may include fewer if --max-chars cuts it short.
+    return { docPath, included: targets.length, total: targets.length };
+  }
   const files = (
     await Promise.all(
       targets.map(async (path): Promise<FileContent | null> => {
@@ -161,7 +181,6 @@ async function generateWhole(brain: BrainClient, provider: Provider, scope: stri
   const [memory, styleGuide, existingDocs] = await Promise.all([brain.readDocOrEmpty("memory.md"), brain.readDocOrEmpty("style-guide.md"), brain.listDocs()]);
   const { system, user } = buildPrompt({ targetPath: `entire project (${included} files)`, targetContent: text, memory, styleGuide, existingDocs }, maxChars);
   const content = await provider.generate(system, user);
-  const docPath = docPathOverride ?? "overview.md";
   await brain.writeDoc(docPath, content);
   return { docPath, included, total: targets.length };
 }
@@ -173,16 +192,26 @@ export async function main(): Promise<void> {
   const via = providerLabel(opts.provider);
 
   if (opts.whole) {
-    const { docPath, included, total } = await generateWhole(brain, provider, opts.target, opts.docPath, opts.maxChars);
+    const { docPath, included, total } = await generateWhole(brain, provider, opts.target, opts.docPath, opts.maxChars, opts.dryRun);
     const note = included < total ? ` (${included}/${total} files fit the --max-chars budget)` : ` (${included} files)`;
-    console.log(`Doc written: ${docPath} (via ${via})${note}`);
+    console.log(`${opts.dryRun ? "Would write" : "Doc written"}: ${docPath} (via ${via})${note}`);
     return;
   }
 
   if (opts.all || opts.sync) {
     const targets = flattenFiles(await brain.listFiles(opts.target ?? "."));
     console.log(`${targets.length} file${targets.length === 1 ? "" : "s"} to document (via ${via}).`);
-    const { done, failed: genFailed } = await generateAllFiles(brain, provider, targets);
+
+    if (opts.dryRun) {
+      for (const t of targets) console.log(`  ${t} -> ${docPathFor(t)}`);
+      if (opts.sync) {
+        const { removed } = await removeStaleDocs(brain, targets, opts.target, true);
+        console.log(`Sync: ${removed} stale doc${removed === 1 ? "" : "s"} would be removed.`);
+      }
+      return;
+    }
+
+    const { done, failed: genFailed } = await generateAllFiles(brain, provider, targets, opts.concurrency);
     console.log(`Done: ${done} written, ${genFailed} failed.`);
     let failed = genFailed;
 
@@ -197,6 +226,11 @@ export async function main(): Promise<void> {
   }
 
   const target = opts.target ?? ".";
-  const docPath = await generateOne(brain, provider, target, opts.docPath);
+  const docPath = opts.docPath ?? (target === "." ? "overview.md" : docPathFor(target));
+  if (opts.dryRun) {
+    console.log(`Would write: ${docPath} (via ${via})`);
+    return;
+  }
+  await generateOne(brain, provider, target, opts.docPath);
   console.log(`Doc written: ${docPath} (via ${via})`);
 }

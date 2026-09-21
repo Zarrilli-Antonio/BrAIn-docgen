@@ -58,6 +58,22 @@ test("parseArgs reads --sync", () => {
   assert.equal(parseArgs([]).sync, false);
 });
 
+test("parseArgs reads --concurrency and --dry-run", () => {
+  const opts = parseArgs(["--all", "--concurrency", "4", "--dry-run"]);
+  assert.equal(opts.concurrency, 4);
+  assert.equal(opts.dryRun, true);
+  assert.equal(parseArgs([]).concurrency, 1);
+  assert.equal(parseArgs([]).dryRun, false);
+});
+
+test("removeStaleDocs dry run reports what would be removed without deleting anything", async () => {
+  const store = fakeDocStore(["src/a.md", "src/b.md"]);
+  const result = await removeStaleDocs(store, ["src/a.ts"], undefined, true);
+  assert.deepEqual(result, { removed: 1, failed: 0 });
+  assert.deepEqual(store.deleted, []);
+  assert.deepEqual(await store.listDocs(), ["src/a.md", "src/b.md"]);
+});
+
 test("removeStaleDocs deletes a doc whose source file is gone, leaves current and protected docs alone", async () => {
   const store = fakeDocStore(["src/a.md", "src/b.md", "memory.md", "overview.md"]);
   // src/b.ts (-> src/b.md) no longer exists; only src/a.ts remains.

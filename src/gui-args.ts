@@ -9,6 +9,8 @@ export interface RunRequest {
   apiKey?: string;
   docPath?: string;
   maxChars?: number;
+  concurrency?: number;
+  dryRun?: boolean;
 }
 
 /** Turns a JSON request from the GUI into the same argv the CLI already takes — one code path,
@@ -27,5 +29,7 @@ export function buildCliArgs(body: RunRequest): string[] {
   if (body.apiKey) args.push("--api-key", body.apiKey);
   if (body.docPath) args.push("--doc-path", body.docPath);
   if (body.maxChars) args.push("--max-chars", String(body.maxChars));
+  if (body.concurrency && body.concurrency > 1) args.push("--concurrency", String(body.concurrency));
+  if (body.dryRun) args.push("--dry-run");
   return args;
 }
