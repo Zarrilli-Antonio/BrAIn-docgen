@@ -1,0 +1,26 @@
+{
+  "name": "brain-docgen",
+  "version": "0.1.0",
+  "description": "Generates BrAIn-format documentation (.brain/docs) for a project, via a local model (Ollama), an Anthropic API key, or any OpenAI-compatible endpoint",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "brain-docgen": "dist/index.js",
+    "brain-docgen-gui": "dist/gui-server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "gui": "node dist/gui-server.js",
+    "setup:ollama": "bash scripts/setup-ollama.sh",
+    "test": "node --test dist/*.test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
