@@ -12,7 +12,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js dist/gui-server.js",
     "start": "node dist/index.js",
     "gui": "node dist/gui-server.js",
     "setup:ollama": "bash scripts/setup-ollama.sh",

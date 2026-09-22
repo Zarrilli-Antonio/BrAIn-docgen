@@ -1,4 +1,6 @@
-# brain-docgen
+<img src="icon.svg" alt="" width="64" height="64" align="left" style="margin: 0 16px 16px 0" />
+
+# BrAIn-docgen
 
 Generates BrAIn-format documentation for a project, using a local model (Ollama), a cloud API key
 (Anthropic), or any OpenAI-compatible endpoint (OpenAI, Groq, Together, DeepSeek, a local
@@ -122,7 +124,7 @@ A local web form for everything above, instead of flags:
 brain-docgen-gui [port]   # default 4174
 ```
 
-Open `http://localhost:4174` (if taken, it tries the next port up, same as BrAIn's own server). Pick a mode (single / `--all` / `--whole` / `--sync`), fill in the
+Open `http://localhost:4174` (if taken, it tries the next port up, same as BrAIn's own server) — see [screenshot.md](screenshot.md) for what it looks like. Pick a mode (single / `--all` / `--whole` / `--sync`), fill in the
 BrAIn URL and model settings, hit Generate — output streams live as it runs, with a progress bar
 for `--all`/`--sync`. Hit Stop to cancel a run in progress. `--all`/`--sync` have a Concurrency
 field to generate several files in parallel; a Dry run checkbox lists what would happen without
